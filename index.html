@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบวัดและประเมินผล</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/feather-icons"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap');
+
+    body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f6; }
+    h1, h2, h3, h4, h5, h6, .font-prompt { font-family: 'Prompt', sans-serif; }
+
+    /* Animations */
+    .slide-in { animation: slideIn 0.3s ease-out forwards; }
+    @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+    .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    /* Custom Scrollbar */
+    .a4-scroll::-webkit-scrollbar { width: 8px; }
+    .a4-scroll::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    .a4-scroll::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+    .a4-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+    /* ==========================================
+       PRINT STYLES - แก้ปัญหาเอกสารล้น/หน้าว่าง
+       ========================================== */
+    @media print {
+      /* ซ่อนส่วนประกอบของเว็บที่ไม่จำเป็น */
+      header, aside, footer, .no-print, .alert-modal { display: none !important; }
+      
+      /* ล้างค่าพื้นหลังและจัดตำแหน่งให้พร้อมพิมพ์ */
+      body, html { 
+        background: white !important; 
+        padding: 0 !important; 
+        margin: 0 !important; 
+      }
+      
+      /* ปลดล็อกคอนเทนเนอร์ที่มี scrollbar ให้แสดงความยาวเอกสารเต็มๆ */
+      main, .print-wrapper, .print-container {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+      }
+      
+      /* พื้นที่เอกสาร A4 ปลดล็อก absolute position */
+      #printable-area { 
+        position: static !important; 
+        width: 100% !important; 
+        height: auto !important;
+        min-height: auto !important; 
+        margin: 0 !important; 
+        padding: 0 !important; 
+        box-shadow: none !important; 
+        background: white !important; 
+      }
+      
+      /* ตั้งระยะขอบกระดาษพิมพ์ที่ 1 ซม. */
+      @page { size: A4 portrait; margin: 1cm; }
+
+      /* กฎการแบ่งหน้ากระดาษ: ห้ามตัดกลางแถวตาราง หรือกลางตารางลายเซ็น */
+      tr, .break-inside-avoid { 
+        page-break-inside: avoid; 
+        break-inside: avoid; 
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- CONFIGURATION ---
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzYSVku10SpSO3faAIv771kt02C7ZYmJ60vevTVa2o5oAYTBljc4oE2qRCD0evRn41hwg/exec';
+
+    // --- THEME COLORS ---
+    const colors = {
+      pink: '#F055A5',
+      lemon: '#FABE37',
+      lime: '#CCD537',
+      violet: '#7A88FE',
+      orange: '#FF9B28',
+      blue: '#BFDFF3'
+    };
+
+    // --- ICON HELPER ---
+    const Icon = ({ name, size = 24, className = "" }) => {
+      // แก้ไขปัญหาหน้าจอขาว (Crash) โดยใช้การพ่น SVG ตรงๆ เพื่อไม่ให้แทรกแซงโครงสร้าง DOM ของ React
+      const svgContent = typeof feather !== 'undefined' && feather.icons[name] 
+        ? feather.icons[name].toSvg({ width: size, height: size, class: className }) 
+        : '';
+      return <span dangerouslySetInnerHTML={{ __html: svgContent }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
+    };
+
+    // ==========================================
+    // MAIN APP COMPONENT
+    // ==========================================
+    function App() {
+      const [user, setUser] = useState(null);
+      const [appState, setAppState] = useState({ isLoading: false, error: null });
+      const [settings, setSettings] = useState({ year: '', term: '', isRecordOpen: true, isPrintOpen: true });
+      const [dbData, setDbData] = useState({ students: [], subjects: [], grades: [], users: [] });
+
+      const fetchAPI = async (action, payload = {}) => {
+        try {
+          const response = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action, ...payload })
+          });
+          const result = await response.json();
+          if (!result.success) throw new Error(result.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์');
+          return result.data;
+        } catch (error) {
+          console.error("API Error:", error);
+          throw new Error('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาตรวจสอบ Google Apps Script');
+        }
+      };
+
+      const handleLogin = async (credentials) => {
+        setAppState({ isLoading: true, error: null });
+        try {
+          if (credentials.role === 'Admin' && credentials.password === 'mer69') {
+            setUser({ role: 'Admin', name: 'ผู้ดูแลระบบ', username: 'admin' });
+            await loadInitialData();
+            return;
+          }
+          const data = await fetchAPI('login', credentials);
+          if (data.user) {
+            setUser(data.user);
+            await loadInitialData();
+          } else {
+            throw new Error('รหัสผ่านหรือข้อมูลไม่ถูกต้อง');
+          }
+        } catch (err) {
+          setAppState({ isLoading: false, error: err.message });
+        }
+      };
+
+      const loadInitialData = async () => {
+        try {
+          const data = await fetchAPI('getInitialData');
+          setSettings(data.settings || { year: '', term: '', isRecordOpen: true, isPrintOpen: true });
+          setDbData({
+            students: data.students || [],
+            subjects: data.subjects || [],
+            grades: data.grades || [],
+            users: data.users || []
+          });
+          setAppState({ isLoading: false, error: null });
+        } catch (err) {
+          setAppState({ isLoading: false, error: 'กำลังเชื่อมต่อระบบ กรุณารอการตั้งค่าจากผู้ดูแล' });
+        }
+      };
+
+      const handleLogout = () => {
+        setUser(null);
+        setDbData({ students: [], subjects: [], grades: [], users: [] });
+      };
+
+      if (!user) {
+        return <LoginScreen onLogin={handleLogin} isLoading={appState.isLoading} error={appState.error} />;
+      }
+
+      return (
+        <MainLayout 
+          user={user} 
+          onLogout={handleLogout} 
+          settings={settings} 
+          dbData={dbData} 
+          fetchAPI={fetchAPI}
+          setDbData={setDbData}
+          setSettings={setSettings}
+        />
+      );
+    }
+
+    // ==========================================
+    // LOGIN SCREEN
+    // ==========================================
+    function LoginScreen({ onLogin, isLoading, error }) {
+      const [role, setRole] = useState('Teacher');
+      const [password, setPassword] = useState('');
+
+      const submit = (e) => {
+        e.preventDefault();
+        onLogin({ role, password });
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-[#f3f4f6] font-sans p-4 md:p-12">
+          {/* ปรับให้รองรับมือถือแบบ บน-ล่าง ด้วย flex-col md:flex-row */}
+          <div className="bg-white rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.2)] max-w-6xl w-[92%] flex flex-col md:flex-row overflow-hidden min-h-0 md:min-h-[500px] border border-gray-100 slide-in">
+            
+            {/* ฝั่งภาพซ้ายมือ (แสดงด้านบนเมื่ออยู่บนมือถือ) */}
+            <div className="w-full md:w-1/2 h-[320px] md:h-auto relative overflow-hidden flex flex-col justify-between p-4 md:p-10">
+              <div className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 hover:scale-105" style={{ backgroundImage: "url('https://lh3.googleusercontent.com/d/1kWb3n5n5y5S1HrxjUeXuJzZIC6HE3BAe')" }} />
+              
+              {/* แสงเงาไล่ระดับ มืดจากล่างขึ้นบน */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent" />
+              
+              {/* ชื่อระบบ จัดชิดซ้าย ไม่ตัดคำ */}
+              <div className="relative z-10 text-left text-white fade-in mt-1">
+                <h1 className="font-bold tracking-tight mb-2 drop-shadow-lg leading-tight font-sans" style={{ fontSize: "clamp(1.5rem, 3vw, 2.25rem)", }}>
+                  ระบบรายงานและติดตาม<br/>ความก้าวหน้าผลการเรียน
+                </h1>
+                <p className="text-white/80 text-base md:text-lg drop-shadow-md font-sans">
+                  โรงเรียนทรัพย์ทวี
+                </p>
+              </div>
+
+              <div className="relative z-10 mt-auto fade-in" style={{animationDelay: '0.2s'}}>
+                {/* การ์ดกระจกเบลอ 3 ใบ */}
+                <div className="grid grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-4">
+                  <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 text-left transition-all hover:-translate-y-1.5 hover:bg-white/20 hover:shadow-lg cursor-default shadow-sm">
+                    <Icon name="file-text" size={18} className="text-white mb-2" />
+                    <h3 className="text-white font-medium text-[12px] md:text-[16px] mb-1">บันทึกผล<br/>ของผู้เรียน</h3>
+                    <p className="text-gray-200 text-[8px] md:text-[12px] leading-tight font-light">จัดเก็บคะแนนและผลการประเมินอย่างรวดเร็ว</p>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 text-left transition-all hover:-translate-y-1.5 hover:bg-white/20 hover:shadow-lg cursor-default shadow-sm">
+                    <Icon name="pie-chart" size={18} className="text-white mb-2" />
+                    <h3 className="text-white font-medium text-[12px] md:text-[16px] mb-1">ภาพรวม</h3>
+                    <p className="text-gray-200 text-[8px] md:text-[12px] leading-tight font-light">วิเคราะห์ภาพรวมการเรียนแบบเรียลไทม์</p>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 text-left transition-all hover:-translate-y-1.5 hover:bg-white/20 hover:shadow-lg cursor-default shadow-sm">
+                    <Icon name="database" size={18} className="text-white mb-2" />
+                    <h3 className="text-white font-medium text-[12px] md:text-[16px] mb-1">จัดการข้อมูลอย่างเป็นระบบ</h3>
+                    <p className="text-gray-200 text-[8px] md:text-[12px] leading-tight font-light">บริหารจัดการผู้ใช้และข้อมูลหลักได้ครบถ้วน</p>
+                  </div>
+                </div>
+
+                {/* Footer จัดกึ่งกลาง */}
+                <div className="text-center w-full">
+                  <p className="text-white/70 text-[10px]">© 2026 ระบบรายงานและติดตามความก้าวหน้าผลการเรียน</p>
+                  <p className="text-white/70 text-[10px]">พัฒนาและออกแบบเพื่อการใช้งานในสถานศึกษา สงวนลิขสิทธิ์</p>
+                </div>
+              </div>
+            </div>
+
+            {/* ฝั่งฟอร์มเข้าสู่ระบบขวามือ (แสดงด้านล่างเมื่ออยู่บนมือถือ) */}
+            <div className="w-full md:w-1/2 flex items-center justify-center p-8 md:p-12 bg-white relative">
+              <div className="w-full max-w-[380px] fade-in" style={{animationDelay: '0.3s'}}>
+                <div className="text-center mb-2">
+                  <h2 className="text-3xl font-bold text-gray-700 mb-2 md:mb-4">เข้าสู่ระบบ</h2>
+                  <p className="text-gray-500 text-sm mb-6 md:mb-8">กรุณาเลือกประเภทผู้ใช้งานและรหัสผ่าน</p>
+                </div>
+
+                {error && (
+                  <div className="mb-6 p-4 rounded-xl bg-red-50 text-red-600 text-sm flex items-start border border-red-100 animate-pulse">
+                    <Icon name="alert-circle" size={18} className="mr-2 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <form onSubmit={submit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">ประเภทผู้ใช้งาน</label>
+                    <div className="relative group">
+                      <select className="w-full appearance-none px-5 py-3.5 rounded-xl border-2 border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-[#7A88FE]/20 focus:border-[#7A88FE] transition-all text-gray-700 font-bold cursor-pointer outline-none" value={role} onChange={(e) => setRole(e.target.value)}>
+                        <option value="Teacher">ครูผู้สอน</option>
+                        <option value="Director">ผู้อำนวยการ</option>
+                        <option value="Admin">ผู้ดูแลระบบ</option>
+                      </select>
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm pointer-events-none group-hover:bg-[#7A88FE]/10 transition-colors">
+                        <Icon name="chevron-down" className="text-gray-400 group-hover:text-[#7A88FE]" size={18} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">รหัสผ่าน</label>
+                    <input type="password" className="w-full px-5 py-3.5 rounded-xl border-2 border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-[#7A88FE]/20 focus:border-[#7A88FE] transition-all font-medium outline-none" placeholder="กรอกรหัสผ่านของคุณ" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                  </div>
+
+                  <button type="submit" disabled={isLoading} className={`w-full py-4 rounded-xl text-white font-bold shadow-[0_8px_20px_rgba(122,136,254,0.3)] transition-all flex justify-center items-center gap-2 mt-8 text-lg ${isLoading ? 'bg-gray-400 cursor-not-allowed shadow-none' : 'bg-[#7A88FE] hover:bg-[#6574f0] hover:-translate-y-1 hover:shadow-[0_15px_25px_rgba(122,136,254,0.4)]'}`}>
+                    {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'เข้าสู่ระบบ'}
+                  </button>
+                </form>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // MAIN LAYOUT
+    // ==========================================
+    function MainLayout({ user, onLogout, settings, dbData, fetchAPI, setDbData, setSettings }) {
+      const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+      const [currentRoute, setCurrentRoute] = useState('dashboard');
+      const [alertMsg, setAlertMsg] = useState(null);
+
+      const showAlert = (title, message, type = 'info', onConfirm = null) => {
+        setAlertMsg({ title, message, type, onConfirm });
+      };
+
+      const navItems = [
+        { id: 'dashboard', label: 'สรุปภาพรวม', icon: 'home', roles: ['Admin', 'Teacher', 'Director'] },
+        { id: 'record-ms', label: 'บันทึกผลนักเรียนติด มส', icon: 'file-text', roles: ['Teacher'] },
+        { id: 'record-r-ms', label: 'ยืนยันผลการเรียน ร มส', icon: 'file-text', roles: ['Teacher'] },
+        { id: 'record-0', label: 'ยืนยันผลการเรียนติด 0', icon: 'file-text', roles: ['Teacher'] },
+        { id: 'reports', label: 'ระบบพิมพ์รายงาน', icon: 'printer', roles: ['Admin', 'Teacher', 'Director'] },
+        { id: 'admin', label: 'ตั้งค่าระบบ', icon: 'settings', roles: ['Admin'] },
+      ];
+
+      const allowedNavItems = navItems.filter(item => item.roles.includes(user.role));
+
+      return (
+        <div className="min-h-screen bg-[#f3f4f6] flex flex-col font-sans">
+          <header className="bg-white shadow-sm z-20 relative px-4 py-3 flex items-center justify-between no-print">
+            <div className="flex items-center gap-4">
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+                <Icon name="menu" />
+              </button>
+              <div>
+                <h1 className="text-xl font-bold text-gray-800 leading-tight">งานวัดและประเมินผล</h1>
+                <h2 className="text-sm text-gray-500">ฝ่ายบริหารวิชาการ โรงเรียนทรัพย์ทวี</h2>
+                <p className="text-[10px] text-gray-400 whitespace-nowrap">สำนักงานเขตพื้นที่การศึกษาสุราษฎร์ธานี เขต 3</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="hidden md:block text-right mr-2">
+                <p className="text-sm font-semibold text-gray-700">{user.name}</p>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${user.role === 'Admin' ? 'bg-[#7A88FE]/10 text-[#7A88FE]' : user.role === 'Teacher' ? 'bg-[#F055A5]/10 text-[#F055A5]' : 'bg-[#FABE37]/10 text-[#FABE37]'}`}>
+                  {user.role === 'Admin' ? 'ผู้ดูแลระบบ' : user.role === 'Teacher' ? 'ครูผู้สอน' : 'ผู้อำนวยการ'}
+                </span>
+              </div>
+              <button onClick={onLogout} className="p-2.5 rounded-full text-red-500 hover:bg-red-50 transition-colors tooltip" title="ออกจากระบบ">
+                <Icon name="log-out" size={20} />
+              </button>
+            </div>
+          </header>
+
+          {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-30 no-print backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />}
+          
+          <aside className={`fixed top-0 left-0 h-full w-72 bg-white shadow-2xl z-40 transform transition-transform duration-300 ease-in-out no-print ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#7A88FE]/10 flex items-center justify-center text-[#7A88FE]"><Icon name="settings" size={22} /></div>
+                <span className="font-bold text-gray-800">เมนูระบบ</span>
+              </div>
+              <button onClick={() => setIsSidebarOpen(false)} className="p-1 text-gray-400 hover:text-gray-700"><Icon name="x-circle" size={20}/></button>
+            </div>
+            <nav className="p-4 space-y-1">
+              {allowedNavItems.map(item => (
+                <button key={item.id} onClick={() => { setCurrentRoute(item.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium ${currentRoute === item.id ? 'bg-[#7A88FE] text-white shadow-md shadow-[#7A88FE]/30' : 'text-gray-600 hover:bg-gray-50 hover:text-[#7A88FE]'}`}>
+                  <Icon name={item.icon} size={18} /> {item.label}
+                </button>
+              ))}
+            </nav>
+          </aside>
+
+          <main className="flex-1 overflow-auto p-4 md:p-6 lg:p-8 w-full max-w-7xl mx-auto relative z-10">
+            <div className="fade-in">
+              {currentRoute === 'dashboard' && <Dashboard dbData={dbData} />}
+              {currentRoute === 'record-ms' && <RecordSystem type="ms" settings={settings} dbData={dbData} user={user} showAlert={showAlert} fetchAPI={fetchAPI} />}
+              {currentRoute === 'record-r-ms' && <RecordSystem type="r-ms" settings={settings} dbData={dbData} user={user} showAlert={showAlert} fetchAPI={fetchAPI} />}
+              {currentRoute === 'record-0' && <RecordSystem type="0" settings={settings} dbData={dbData} user={user} showAlert={showAlert} fetchAPI={fetchAPI} />}
+              {currentRoute === 'reports' && <ReportsSystem settings={settings} dbData={dbData} showAlert={showAlert} />}
+              {currentRoute === 'admin' && user.role === 'Admin' && <AdminSettings settings={settings} setSettings={setSettings} dbData={dbData} fetchAPI={fetchAPI} showAlert={showAlert} />}
+            </div>
+          </main>
+
+          <footer className="bg-white border-t border-gray-200 py-4 text-center no-print mt-auto">
+            <p className="text-[10px] text-gray-400">© 2026 ระบบรายงานและติดตามความก้าวหน้าผลการเรียน</p>
+            <p className="text-[10px] text-gray-400">พัฒนาและออกแบบเพื่อการใช้งานในสถานศึกษา สงวนลิขสิทธิ์</p>
+          </footer>
+
+          {alertMsg && <AlertModal {...alertMsg} onClose={() => setAlertMsg(null)} />}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // DASHBOARD
+    // ==========================================
+    function Dashboard({ dbData }) {
+      const totalStudents = dbData.students?.length || 0;
+      const failingGrades = (dbData.grades || []).filter(g => ['0', 'ร', 'มส 60%', 'มส 80%', 'มส'].includes(g.status));
+      const uniqueFailingStudentIds = new Set(failingGrades.map(g => g.studentId));
+      const totalFails = uniqueFailingStudentIds.size;
+      const totalPass = Math.max(0, totalStudents - totalFails);
+
+      const fail0 = failingGrades.filter(g => g.status === '0').length;
+      const failR = failingGrades.filter(g => g.status === 'ร').length;
+      const failMS = failingGrades.filter(g => g.status && g.status.includes('มส')).length;
+
+      const gradeCounts = {'ม.1': 0, 'ม.2': 0, 'ม.3': 0, 'ม.4': 0, 'ม.5': 0, 'ม.6': 0};
+      (dbData.students || []).forEach(s => {
+        if (gradeCounts[s.grade] !== undefined) gradeCounts[s.grade]++;
+      });
+      const maxGradeCount = Math.max(...Object.values(gradeCounts), 1);
+      const passPercent = totalStudents > 0 ? Math.round((totalPass / totalStudents) * 100) : 0;
+
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 border-l-4 pl-3" style={{borderColor: colors.violet}}>สรุปภาพรวม (Dashboard)</h2>
+          </div>
+          
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+            <StatCard title="นักเรียนทั้งหมด" value={totalStudents} color={colors.violet} icon="users" />
+            <StatCard title="ผ่านเกณฑ์ (มีสิทธิ์สอบ)" value={totalPass} color={colors.lime} icon="check-circle" />
+            <StatCard title="ไม่ผ่านเกณฑ์ (รวม)" value={totalFails} color={colors.pink} icon="alert-circle" />
+            
+            <div className="rounded-2xl p-4 md:p-5 shadow-md flex flex-col justify-center relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-1" style={{ backgroundColor: colors.orange }}>
+              <div className="absolute -right-6 -bottom-6 w-32 h-32 rounded-full bg-white opacity-10"></div>
+              <p className="text-xs md:text-sm text-white/90 mb-2 md:mb-3 font-semibold relative z-10">รายละเอียดผู้ไม่ผ่านเกณฑ์</p>
+              <div className="flex flex-wrap md:flex-nowrap justify-between items-center text-[10px] md:text-sm relative z-10 bg-white/20 p-2 md:p-2.5 rounded-xl backdrop-blur-sm gap-1 md:gap-0">
+                <span className="flex items-center gap-1 md:gap-1.5 text-white font-medium"><div className="w-1.5 h-1.5 md:w-2.5 md:h-2.5 rounded-full bg-white shadow-sm"></div> 0: {fail0}</span>
+                <span className="flex items-center gap-1 md:gap-1.5 text-white font-medium"><div className="w-1.5 h-1.5 md:w-2.5 md:h-2.5 rounded-full bg-white shadow-sm"></div> ร: {failR}</span>
+                <span className="flex items-center gap-1 md:gap-1.5 text-white font-medium"><div className="w-1.5 h-1.5 md:w-2.5 md:h-2.5 rounded-full bg-white shadow-sm"></div> มส: {failMS}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-lg font-bold text-gray-800 mb-6">จำนวนนักเรียนแยกตามระดับชั้น</h3>
+              <div className="h-64 flex items-end justify-around gap-2 pt-10">
+                {Object.keys(gradeCounts).map((grade, idx) => {
+                  const count = gradeCounts[grade];
+                  const heightPct = (count / maxGradeCount) * 100;
+                  return (
+                    <div key={grade} className="flex flex-col items-center flex-1 group">
+                      <div className="relative w-full max-w-[40px] flex justify-center">
+                        <span className="absolute -top-7 text-xs font-bold text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">{count}</span>
+                        <div className="w-full rounded-t-lg transition-all duration-500 group-hover:opacity-80 shadow-sm" style={{ height: `${heightPct}%`, minHeight: count > 0 ? '20px' : '0px', backgroundColor: Object.values(colors)[idx % 6] }}></div>
+                      </div>
+                      <span className="text-xs text-gray-500 mt-3 font-medium">{grade}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
+              <h3 className="text-lg font-bold text-gray-800 mb-6 self-start">อัตราส่วนสิทธิ์สอบ</h3>
+              <div className="relative w-48 h-48 my-auto">
+                <div className="w-full h-full rounded-full shadow-inner" style={{ background: `conic-gradient(${colors.lime} 0% ${passPercent}%, ${colors.pink} ${passPercent}% 100%)`}}></div>
+                <div className="absolute inset-4 bg-white rounded-full flex flex-col items-center justify-center shadow-md">
+                  <span className="text-3xl font-bold" style={{color: colors.violet}}>{passPercent}%</span>
+                  <span className="text-xs text-gray-500">มีสิทธิ์สอบ</span>
+                </div>
+              </div>
+              <div className="flex gap-6 mt-6 w-full justify-center">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 rounded-full" style={{background: colors.lime}}></div>
+                  <span className="font-medium text-gray-600">มีสิทธิ์ ({totalPass})</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 rounded-full" style={{background: colors.pink}}></div>
+                  <span className="font-medium text-gray-600">ไม่มีสิทธิ์ ({totalFails})</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function StatCard({ title, value, color, icon }) {
+      return (
+        <div className="rounded-2xl p-4 md:p-5 shadow-md flex flex-col md:flex-row items-center md:items-center gap-2 md:gap-4 relative overflow-hidden group transition-all hover:shadow-lg hover:-translate-y-1" style={{ backgroundColor: color }}>
+          <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-white opacity-10 transition-transform duration-500 group-hover:scale-[1.8]"></div>
+          <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 rounded-xl md:rounded-2xl flex items-center justify-center shadow-inner z-10 bg-white/20 text-white backdrop-blur-sm"><Icon name={icon} /></div>
+          <div className="z-10 text-white text-center md:text-left w-full">
+            <p className="text-white/90 text-[10px] md:text-sm font-semibold mb-0.5 md:mb-1 line-clamp-1">{title}</p>
+            <h3 className="text-xl md:text-3xl font-bold drop-shadow-sm">{value}</h3>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // RECORD SYSTEM
+    // ==========================================
+    function RecordSystem({ type, settings, dbData, user, showAlert, fetchAPI }) {
+      const [grade, setGrade] = useState('');
+      const [subjectId, setSubjectId] = useState('');
+      const [formData, setFormData] = useState({});
+      const [isSaving, setIsSaving] = useState(false);
+
+      if (!settings.isRecordOpen) {
+        return (
+          <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
+            <Icon name="alert-circle" size={48} className="mx-auto text-orange-400 mb-4 opacity-50" />
+            <h2 className="text-2xl font-bold text-gray-700 mb-2">ระบบปิดรับข้อมูลชั่วคราว</h2>
+            <p className="text-gray-500">ผู้ดูแลระบบได้ปิดการบันทึกผลการเรียนในขณะนี้ กรุณาติดต่อฝ่ายวิชาการ</p>
+          </div>
+        );
+      }
+
+      const titleMap = { 'ms': 'บันทึกผลนักเรียนติด มส', 'r-ms': 'ยืนยันผลการเรียน ร มส', '0': 'ยืนยันผลการเรียนติด 0' };
+      const gradeOptions = [...new Set((dbData.subjects || []).map(s => s.grade))].sort();
+      const filteredSubjects = (dbData.subjects || []).filter(s => s.grade === grade);
+      const displayStudents = (dbData.students || []).filter(s => s.grade === grade);
+
+      const handleStudentChange = (studentId, field, value) => {
+        setFormData(prev => ({ ...prev, [studentId]: { ...prev[studentId], [field]: value } }));
+      };
+
+      const handleSave = () => {
+        if (!grade || !subjectId) return showAlert('แจ้งเตือน', 'กรุณาเลือกระดับชั้นและรายวิชาก่อนบันทึก', 'error');
+        const recordsCount = Object.keys(formData).length;
+        if (recordsCount === 0) return showAlert('แจ้งเตือน', 'คุณยังไม่ได้บันทึกข้อมูลใดๆ', 'error');
+
+        showAlert('ยืนยันการบันทึก', `คุณต้องการบันทึกข้อมูลจำนวน ${recordsCount} รายการ ใช่หรือไม่?`, 'info', async () => {
+          setIsSaving(true);
+          try {
+            const payload = Object.entries(formData).map(([sId, data]) => ({
+              year: settings.year, term: settings.term, teacher: user.name, subjectId, studentId: sId, ...data
+            }));
+            await fetchAPI('saveGrades', { data: payload });
+            showAlert('สำเร็จ', 'บันทึกข้อมูลลงในระบบเรียบร้อยแล้ว', 'success');
+            setFormData({});
+          } catch (err) {
+            showAlert('เกิดข้อผิดพลาด', err.message, 'error');
+          } finally {
+            setIsSaving(false);
+          }
+        });
+      };
+
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-[#7A88FE]/5 p-6 border-b border-gray-100 flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-[#7A88FE]">{titleMap[type]}</h2>
+              <p className="text-sm text-gray-500 mt-1">ปีการศึกษา {settings.year} ภาคเรียนที่ {settings.term} | ครูผู้สอน: {user.name}</p>
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-3">เลือกระดับชั้น</label>
+                <div className="relative group">
+                  <select className="w-full appearance-none px-5 py-4 rounded-xl border-2 border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-[#7A88FE]/20 focus:border-[#7A88FE] transition-all text-gray-700 font-bold cursor-pointer outline-none hover:border-gray-200" value={grade} onChange={e => {setGrade(e.target.value); setSubjectId(''); setFormData({});}}>
+                    <option value="">-- เลือกระดับชั้น --</option>
+                    {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <div className="absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm pointer-events-none group-hover:bg-[#7A88FE]/10 transition-colors">
+                    <Icon name="chevron-down" className="text-gray-400 group-hover:text-[#7A88FE]" size={18} />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-3">เลือกรายวิชา</label>
+                <div className="relative group">
+                  <select className={`w-full appearance-none px-5 py-4 rounded-xl border-2 transition-all font-bold outline-none ${!grade ? 'border-gray-100 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-100 bg-gray-50 hover:border-gray-200 focus:bg-white focus:ring-4 focus:ring-[#7A88FE]/20 focus:border-[#7A88FE] text-gray-700 cursor-pointer'}`} value={subjectId} onChange={e => setSubjectId(e.target.value)} disabled={!grade}>
+                    <option value="">-- เลือกวิชา --</option>
+                    {filteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name} ({s.id})</option>)}
+                  </select>
+                  <div className={`absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center pointer-events-none transition-colors ${!grade ? 'bg-transparent' : 'bg-white shadow-sm group-hover:bg-[#7A88FE]/10'}`}>
+                    <Icon name="chevron-down" className={!grade ? 'text-gray-300' : 'text-gray-400 group-hover:text-[#7A88FE]'} size={18} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {grade && subjectId && (
+              <div className="overflow-x-auto fade-in">
+                <table className="w-full min-w-[800px] text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-600 text-sm">
+                      <th className="p-4 rounded-tl-xl w-16">เลขที่</th>
+                      <th className="p-4 w-24">รหัส</th>
+                      <th className="p-4">ชื่อ - นามสกุล</th>
+                      {type === 'ms' && (<><th className="p-4 w-64 text-center">สถานะ</th><th className="p-4 rounded-tr-xl">หมายเหตุ</th></>)}
+                      {type === 'r-ms' && (<><th className="p-4 text-center border-l border-gray-200">ร</th><th className="p-4 text-center border-l border-gray-200">มส</th><th className="p-4 text-center border-l border-gray-200 rounded-tr-xl">สรุปผล</th></>)}
+                      {type === '0' && (<th className="p-4 text-center rounded-tr-xl">ผลการเรียน</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayStudents.map((student, idx) => (
+                      <tr key={student.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                        <td className="p-4 text-gray-500">{idx + 1}</td>
+                        <td className="p-4 text-gray-500 font-mono text-sm">{student.id}</td>
+                        <td className="p-4 font-medium text-gray-700">{student.name}</td>
+                        
+                        {type === 'ms' && (
+                          <>
+                            <td className="p-4">
+                              <div className="flex gap-2 justify-center">
+                                {['ผ่านเกณฑ์', 'มส 80%', 'มส 60%'].map(opt => (
+                                  <button key={opt} onClick={() => handleStudentChange(student.id, 'status', opt)} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${formData[student.id]?.status === opt ? (opt === 'ผ่านเกณฑ์' ? 'bg-[#CCD537] text-white shadow-md' : 'bg-[#F055A5] text-white shadow-md') : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{opt}</button>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-4"><input type="text" placeholder="พิมพ์สั้นๆ..." className="w-full p-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-[#7A88FE]" value={formData[student.id]?.note || ''} onChange={(e) => handleStudentChange(student.id, 'note', e.target.value)} /></td>
+                          </>
+                        )}
+
+                        {type === 'r-ms' && (
+                          <>
+                            <td className="p-4 border-l border-gray-100"><div className="flex flex-col gap-1 items-center">{['ร', 'ผ่าน'].map(opt => (<label key={opt} className="flex items-center gap-2 cursor-pointer text-sm"><input type="radio" name={`r-${student.id}`} className="accent-[#FF9B28]" checked={formData[student.id]?.statusR === opt} onChange={() => handleStudentChange(student.id, 'statusR', opt)} /> {opt}</label>))}</div></td>
+                            <td className="p-4 border-l border-gray-100"><div className="flex flex-col gap-1 items-center">{['มส 60%', 'มส 80%', 'ผ่าน'].map(opt => (<label key={opt} className="flex items-center gap-2 cursor-pointer text-sm"><input type="radio" name={`ms-${student.id}`} className="accent-[#F055A5]" checked={formData[student.id]?.statusMS === opt} onChange={() => handleStudentChange(student.id, 'statusMS', opt)} /> {opt}</label>))}</div></td>
+                            <td className="p-4 border-l border-gray-100"><div className="flex flex-col gap-1 items-center">{['มีสิทธิ์สอบ', 'ไม่มีสิทธิ์สอบ'].map(opt => (<label key={opt} className="flex items-center gap-2 cursor-pointer text-sm font-medium"><input type="radio" name={`final-${student.id}`} className={opt === 'มีสิทธิ์สอบ' ? "accent-[#CCD537]" : "accent-[#F055A5]"} checked={formData[student.id]?.statusFinal === opt} onChange={() => handleStudentChange(student.id, 'statusFinal', opt)} /> <span className={formData[student.id]?.statusFinal === opt ? (opt === 'มีสิทธิ์สอบ' ? 'text-[#a1a82a]' : 'text-[#c94186]') : 'text-gray-500'}>{opt}</span></label>))}</div></td>
+                          </>
+                        )}
+
+                        {type === '0' && (
+                          <td className="p-4 text-center">
+                            <div className="inline-flex bg-gray-100 rounded-lg p-1">
+                              {['0', 'ปกติ'].map(opt => (<button key={opt} onClick={() => handleStudentChange(student.id, 'status', opt)} className={`px-6 py-2 rounded-md text-sm font-bold transition-all ${formData[student.id]?.status === opt ? (opt === '0' ? 'bg-[#F055A5] text-white shadow' : 'bg-[#CCD537] text-white shadow') : 'text-gray-500 hover:bg-gray-200'}`}>{opt}</button>))}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-8 flex justify-end">
+                  <button onClick={handleSave} disabled={isSaving} className={`px-8 py-3 rounded-xl text-white font-bold shadow-lg transition-all flex items-center gap-2 ${isSaving ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#7A88FE] hover:bg-[#6574f0] hover:scale-105'}`}>
+                    {isSaving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Icon name="check" size={20} />} บันทึกผล
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // REPORTS SYSTEM - ปรับปรุงการพิมพ์และการเรียงปุ่ม
+    // ==========================================
+    function ReportsSystem({ settings, dbData, showAlert }) {
+      const [reportType, setReportType] = useState(null); // 'individual', 'room', 'all'
+      const [selectedGrade, setSelectedGrade] = useState('');
+      const [selectedStudent, setSelectedStudent] = useState('');
+      const [preview, setPreview] = useState(false);
+
+      if (!settings.isPrintOpen) {
+        return (
+          <div className="bg-white rounded-2xl p-10 text-center shadow-sm border border-gray-100">
+            <Icon name="printer" size={48} className="mx-auto text-blue-300 mb-4 opacity-50" />
+            <h2 className="text-2xl font-bold text-gray-700 mb-2">ระบบพิมพ์รายงานปิดให้บริการชั่วคราว</h2>
+            <p className="text-gray-500">เพื่อความสมบูรณ์ของข้อมูล กรุณารอประกาศเปิดระบบจากผู้ดูแล</p>
+          </div>
+        );
+      }
+
+      const gradeOptions = [...new Set((dbData.students || []).map(s => s.grade))].sort();
+      const studentsInGrade = (dbData.students || []).filter(s => s.grade === selectedGrade);
+
+      const handleSelectReport = (type) => {
+        setReportType(type);
+        setPreview(false);
+        setSelectedGrade('');
+        setSelectedStudent('');
+        if (type === 'all') setPreview(true);
+      };
+
+      const handleShowPreview = () => {
+        if (reportType === 'room' && !selectedGrade) return showAlert('แจ้งเตือน', 'กรุณาเลือกระดับชั้น', 'error');
+        if (reportType === 'individual' && (!selectedGrade || !selectedStudent)) return showAlert('แจ้งเตือน', 'กรุณาเลือกข้อมูลให้ครบถ้วน', 'error');
+        setPreview(true);
+      };
+
+      // ฟังก์ชันตารางเซ็นชื่อ 2x2 ตามโจทย์
+      const SignatureTable = () => (
+        <div className="break-inside-avoid mt-4">
+          <table className="w-full border-collapse mt-2 text-[11px] font-normal font-sarabun text-black" style={{border: 'none'}}>
+            <tbody>
+              <tr className="break-inside-avoid">
+                <td className="py-4 text-center w-1/2 align-bottom" style={{border: 'none'}}>
+                  (ลงชื่อ)...................................................<br/>
+                  (นายนิติพงศ์ คงทอง)<br/>
+                  ผู้รายงาน
+                </td>
+                <td className="py-4 text-center w-1/2 align-bottom" style={{border: 'none'}}>
+                  (ลงชื่อ)....................................................<br/>
+                  (นางดุษฎี บุญส่ง)<br/>
+                  หัวหน้าฝ่ายบริหารวิชาการ
+                </td>
+              </tr>
+              <tr className="break-inside-avoid">
+                <td className="py-4 text-center w-1/2 align-bottom" style={{border: 'none'}}>
+                  (ลงชื่อ).....................................................<br/>
+                  (นางมธุรส รัตนะ)<br/>
+                  หัวหน้างานวัดผล
+                </td>
+                <td className="py-4 text-center w-1/2 align-bottom" style={{border: 'none'}}>
+                  (ลงชื่อ).....................................................<br/>
+                  (นางทิพยา ชูจิตร)<br/>
+                  ผู้อำนวยการโรงเรียนทรัพย์ทวี
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      );
+
+      // รวบรวมข้อมูลจริงจาก dbData
+      let reportData = [];
+      if (preview) {
+        let gradesToProcess = [];
+        if (reportType === 'individual') {
+          gradesToProcess = (dbData.grades || []).filter(g => String(g.studentId) === String(selectedStudent));
+        } else if (reportType === 'room') {
+          const roomStudentIds = studentsInGrade.map(s => String(s.id));
+          gradesToProcess = (dbData.grades || []).filter(g => roomStudentIds.includes(String(g.studentId)));
+        } else {
+          gradesToProcess = dbData.grades || [];
+        }
+
+        reportData = gradesToProcess.map(g => {
+          const student = dbData.students.find(s => String(s.id) === String(g.studentId)) || {};
+          const subject = dbData.subjects.find(s => String(s.id) === String(g.subjectId)) || {};
+          return {
+            ...g,
+            studentName: student.name || 'ไม่พบข้อมูล',
+            grade: student.grade || '',
+            subjectName: subject.name || 'ไม่พบวิชา'
+          };
+        }).sort((a, b) => String(a.studentId).localeCompare(String(b.studentId)));
+      }
+
+      const targetStudent = dbData.students.find(s => String(s.id) === String(selectedStudent)) || {};
+      const now = new Date();
+      const printDateTime = `พิมพ์เมื่อ ${now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })} เวลา ${now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`;
+
+      return (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl p-6 no-print shadow-sm border border-gray-100">
+            <h2 className="text-xl font-bold text-[#FF9B28] mb-6 flex items-center gap-2">
+              <Icon name="printer" /> เลือกระบบพิมพ์รายงาน
+            </h2>
+            
+            {/* เรียงปุ่มตามโจทย์: รายบุคคล -> รายห้อง -> ทั้งหมด */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button onClick={() => handleSelectReport('individual')} className={`p-6 rounded-xl border-2 text-left transition-all ${reportType === 'individual' ? 'border-[#FF9B28] bg-orange-50' : 'border-gray-100 hover:border-[#FF9B28]'}`}>
+                <h3 className="font-bold text-lg text-gray-700">1. รายงานรายบุคคล</h3>
+              </button>
+              <button onClick={() => handleSelectReport('room')} className={`p-6 rounded-xl border-2 text-left transition-all ${reportType === 'room' ? 'border-[#FF9B28] bg-orange-50' : 'border-gray-100 hover:border-[#FF9B28]'}`}>
+                <h3 className="font-bold text-lg text-gray-700">2. รายงานผลรายห้องเรียน</h3>
+              </button>
+              <button onClick={() => handleSelectReport('all')} className={`p-6 rounded-xl border-2 text-left transition-all ${reportType === 'all' ? 'border-[#FF9B28] bg-orange-50' : 'border-gray-100 hover:border-[#FF9B28]'}`}>
+                <h3 className="font-bold text-lg text-gray-700">3. รายงานผลทั้งหมด</h3>
+              </button>
+            </div>
+
+            {/* ส่วนเลือกเงื่อนไข (รายบุคคล / ห้องเรียน) */}
+            {(reportType === 'individual' || reportType === 'room') && !preview && (
+              <div className="mt-6 p-6 bg-gray-50 rounded-xl border border-gray-200 slide-in">
+                <h3 className="font-bold mb-4 text-gray-700">ระบุข้อมูลที่ต้องการพิมพ์</h3>
+                <div className="flex flex-col md:flex-row gap-4 items-end">
+                  <div className="w-full md:w-1/3">
+                    <label className="block text-sm font-medium mb-2">ระดับชั้น</label>
+                    <select className="w-full p-3 rounded-lg border border-gray-300 outline-none" value={selectedGrade} onChange={e => {setSelectedGrade(e.target.value); setSelectedStudent('');}}>
+                      <option value="">-- เลือกระดับชั้น --</option>
+                      {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                  {reportType === 'individual' && (
+                    <div className="w-full md:w-1/3">
+                      <label className="block text-sm font-medium mb-2">รายชื่อนักเรียน</label>
+                      <select className="w-full p-3 rounded-lg border border-gray-300 outline-none" value={selectedStudent} onChange={e => setSelectedStudent(e.target.value)} disabled={!selectedGrade}>
+                        <option value="">-- เลือกนักเรียน --</option>
+                        {studentsInGrade.map(s => <option key={s.id} value={s.id}>{s.id} - {s.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <button onClick={handleShowPreview} className="px-6 py-3 bg-[#7A88FE] text-white font-bold rounded-lg hover:bg-[#6574f0] w-full md:w-auto">
+                    ดูรายงาน
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* พรีวิวเอกสาร */}
+          {preview && (
+            <div className="bg-gray-200 p-4 md:p-8 rounded-2xl flex flex-col items-center print-wrapper fade-in">
+              <div className="w-full max-w-[210mm] flex justify-end gap-3 mb-4 no-print">
+                 <button onClick={() => { showAlert('แนะนำการพิมพ์', 'ใช้เมนู Save as PDF ของเบราว์เซอร์เพื่อบันทึกเป็นไฟล์', 'info', () => window.print()) }} className="bg-white text-[#F055A5] px-4 py-2 rounded-lg font-bold shadow flex items-center gap-2"><Icon name="download" size={18} /> PDF</button>
+                <button onClick={() => window.print()} className="bg-[#7A88FE] text-white px-4 py-2 rounded-lg font-bold shadow flex items-center gap-2"><Icon name="printer" size={18} /> พิมพ์รายงาน</button>
+              </div>
+
+              {/* Print Container: ควบคุมไม่ให้ล้นออกในตอน preview ธรรมดา แต่จะขยายเต็มในตอนพิมพ์ */}
+              <div className="w-full overflow-auto a4-scroll flex justify-center pb-8 print-container" style={{maxHeight: '70vh'}}>
+                
+                <div id="printable-area" className="bg-white text-black font-sarabun font-normal flex flex-col shadow-sm" style={{width: '210mm', minHeight: '297mm', height: 'max-content', padding: '1cm', position: 'relative'}}>
+                  
+                  <div className="text-center mb-6">
+                    <div className="text-[14px] font-normal">โรงเรียนทรัพย์ทวี</div>
+                    <div className="text-[14px] font-normal">รายงานผลการเรียนและติดตามความก้าวหน้า</div>
+                    {reportType === 'room' && <div className="text-[12px] font-normal mt-1">รายงานผลรายห้องเรียน ชั้น {selectedGrade}</div>}
+                    {reportType === 'all' && <div className="text-[12px] font-normal mt-1">รายงานผลทั้งหมด</div>}
+                  </div>
+
+                  {reportType === 'individual' ? (
+                    <div className="flex flex-col flex-1">
+                      <div className="flex justify-between mb-4 px-1 text-[11px] font-normal">
+                        <span>เลขประจำตัว: {targetStudent.id || '-'}</span>
+                        <span>ชื่อ-สกุล: {targetStudent.name || '-'}</span>
+                        <span>ชั้น: {targetStudent.grade || '-'}</span>
+                      </div>
+                      
+                      {/* ตารางพิมพ์ ดีไซน์เส้นบาง ไม่มีขอบข้าง ตัวหนังสือเล็ก text-[11px] */}
+                      <table className="w-full border-collapse mb-2 font-normal text-[11px] text-black">
+                        <thead>
+                          <tr className="border-y border-black">
+                            <th className="py-1 px-1 font-normal text-left">รหัสวิชา</th>
+                            <th className="py-1 px-1 font-normal text-left">วิชา</th>
+                            <th className="py-1 px-1 font-normal text-left">ครูผู้สอน</th>
+                            <th className="py-1 px-1 font-normal text-center">ผลการเรียน</th>
+                            <th className="py-1 px-1 font-normal text-center">หมายเหตุ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.length > 0 ? reportData.map((row, i) => {
+                             let gradeStatus = row.status || row.statusR || row.statusMS || '';
+                             let gradeNote = row.note || row.statusFinal || '';
+                             return (
+                              <tr key={i} className="border-b border-black break-inside-avoid">
+                                <td className="py-1 px-1 text-left">{row.subjectId}</td>
+                                <td className="py-1 px-1 text-left">{row.subjectName}</td>
+                                <td className="py-1 px-1 text-left">{row.teacher}</td>
+                                <td className="py-1 px-1 text-center">{gradeStatus}</td>
+                                <td className="py-1 px-1 text-center">{gradeNote}</td>
+                              </tr>
+                            )
+                          }) : <tr className="border-b border-black break-inside-avoid"><td colSpan="5" className="py-4 text-center">ไม่มีข้อมูลผลการเรียน</td></tr>}
+                        </tbody>
+                      </table>
+                      
+                      <div className="text-right mt-2 mb-4 text-[10px]">{printDateTime}</div>
+                      
+                      {/* ดันส่วนตารางเซ็นไว้ด้านล่างสุดของหน้าในรายงานเดี่ยว */}
+                      <div className="mt-auto pt-4 break-inside-avoid"><SignatureTable /></div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col flex-1">
+                      <table className="w-full border-collapse mb-2 font-normal text-[11px] text-black">
+                        <thead>
+                          <tr className="border-y border-black">
+                            <th className="py-1 px-1 font-normal text-center w-12">เลขประจำตัว</th>
+                            <th className="py-1 px-1 font-normal text-left">ชื่อ-สกุล</th>
+                            <th className="py-1 px-1 font-normal text-center w-10">ชั้น</th>
+                            <th className="py-1 px-1 font-normal text-left w-14">รหัสวิชา</th>
+                            <th className="py-1 px-1 font-normal text-left">วิชา</th>
+                            <th className="py-1 px-1 font-normal text-left">ครูผู้สอน</th>
+                            <th className="py-1 px-1 font-normal text-center w-14">ผลการเรียน</th>
+                            <th className="py-1 px-1 font-normal text-center w-16">หมายเหตุ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.length > 0 ? reportData.map((row, i) => {
+                            let gradeStatus = row.status || row.statusR || row.statusMS || '';
+                            let gradeNote = row.note || row.statusFinal || '';
+                            return (
+                              <tr key={i} className="border-b border-black break-inside-avoid">
+                                <td className="py-1 px-1 text-center">{row.studentId}</td>
+                                <td className="py-1 px-1 text-left">{row.studentName}</td>
+                                <td className="py-1 px-1 text-center">{row.grade}</td>
+                                <td className="py-1 px-1 text-left">{row.subjectId}</td>
+                                <td className="py-1 px-1 text-left">{row.subjectName}</td>
+                                <td className="py-1 px-1 text-left">{row.teacher}</td>
+                                <td className="py-1 px-1 text-center">{gradeStatus}</td>
+                                <td className="py-1 px-1 text-center">{gradeNote}</td>
+                              </tr>
+                            )
+                          }) : <tr className="border-b border-black break-inside-avoid"><td colSpan="8" className="py-4 text-center">ไม่มีข้อมูล</td></tr>}
+                        </tbody>
+                      </table>
+                      
+                      <div className="text-right mt-2 mb-4 text-[10px]">{printDateTime}</div>
+                      
+                      <div className="mt-auto pt-4 break-inside-avoid"><SignatureTable /></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // ADMIN SETTINGS
+    // ==========================================
+    function AdminSettings({ settings, setSettings, fetchAPI, showAlert }) {
+      const [localSettings, setLocalSettings] = useState(settings);
+      const [isSaving, setIsSaving] = useState(false);
+
+      const saveSettings = async () => {
+        setIsSaving(true);
+        try {
+          await fetchAPI('saveSettings', { data: localSettings });
+          setSettings(localSettings);
+          showAlert('สำเร็จ', 'บันทึกการตั้งค่าระบบเรียบร้อยแล้ว', 'success');
+        } catch (error) {
+          showAlert('ผิดพลาด', 'ไม่สามารถบันทึกได้ กรุณาตรวจสอบสคริปต์หลังบ้าน', 'error');
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 min-h-[500px]">
+          <h2 className="text-2xl font-bold text-gray-800 mb-6 border-l-4 border-[#7A88FE] pl-3">การจัดการระบบ (Admin)</h2>
+          
+          <div className="max-w-xl space-y-6 fade-in">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">ปีการศึกษาปัจจุบัน</label>
+                <input type="text" className="w-full p-3 rounded-lg border border-gray-300 focus:border-[#7A88FE]" value={localSettings.year} onChange={e => setLocalSettings({...localSettings, year: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">ภาคเรียนปัจจุบัน</label>
+                <input type="text" className="w-full p-3 rounded-lg border border-gray-300 focus:border-[#7A88FE]" value={localSettings.term} onChange={e => setLocalSettings({...localSettings, term: e.target.value})} />
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <label className="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-gray-50 cursor-pointer hover:bg-gray-100">
+                <div>
+                  <h4 className="font-bold text-gray-800">เปิดระบบบันทึกข้อมูล</h4>
+                  <p className="text-xs text-gray-500">อนุญาตให้ครูเข้ามาบันทึกผล มส, ร, 0 ได้</p>
+                </div>
+                <input type="checkbox" className="w-6 h-6 accent-[#CCD537]" checked={localSettings.isRecordOpen} onChange={e => setLocalSettings({...localSettings, isRecordOpen: e.target.checked})} />
+              </label>
+              <label className="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-gray-50 cursor-pointer hover:bg-gray-100">
+                <div>
+                  <h4 className="font-bold text-gray-800">เปิดระบบพิมพ์รายงาน</h4>
+                  <p className="text-xs text-gray-500">อนุญาตให้ผู้ใช้งานพิมพ์หรือดูรายงานได้</p>
+                </div>
+                <input type="checkbox" className="w-6 h-6 accent-[#BFDFF3]" checked={localSettings.isPrintOpen} onChange={e => setLocalSettings({...localSettings, isPrintOpen: e.target.checked})} />
+              </label>
+            </div>
+
+            <button onClick={saveSettings} disabled={isSaving} className="mt-6 px-6 py-3 bg-[#7A88FE] text-white font-bold rounded-lg hover:bg-[#6574f0]">
+              {isSaving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // CUSTOM ALERT MODAL
+    // ==========================================
+    function AlertModal({ title, message, type, onClose, onConfirm }) {
+      const colorClass = type === 'success' ? 'text-[#CCD537]' : type === 'error' ? 'text-[#F055A5]' : 'text-[#FABE37]';
+      const btnClass = type === 'success' ? 'bg-[#CCD537]' : type === 'error' ? 'bg-[#F055A5]' : 'bg-[#7A88FE]';
+      const iconName = type === 'success' ? 'check-circle' : type === 'error' ? 'x-circle' : 'alert-circle';
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm slide-in alert-modal">
+          <div className="bg-white rounded-2xl p-6 md:p-8 max-w-sm w-full shadow-2xl relative overflow-hidden">
+            <div className={`absolute top-0 left-0 w-full h-1.5 ${btnClass}`}></div>
+            <div className="text-center">
+              <Icon name={iconName} size={56} className={`mx-auto mb-4 ${colorClass}`} />
+              <h3 className="text-xl font-bold text-gray-800 mb-2">{title}</h3>
+              <p className="text-gray-600 mb-8">{message}</p>
+              
+              <div className="flex gap-3 justify-center">
+                {onConfirm && <button onClick={() => { onConfirm(); onClose(); }} className={`px-6 py-2.5 rounded-xl text-white font-bold transition-transform hover:scale-105 shadow-md ${btnClass}`}>ยืนยัน</button>}
+                <button onClick={onClose} className={`px-6 py-2.5 rounded-xl font-bold transition-colors ${onConfirm ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : `${btnClass} text-white shadow-md`}`}>
+                  {onConfirm ? 'ยกเลิก' : 'ตกลง'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
