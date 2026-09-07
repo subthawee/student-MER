@@ -338,7 +338,7 @@
               <div>
                 <h1 className="text-xl font-semibold text-gray-800 leading-tight">งานวัดและประเมินผล</h1>
                 <h2 className="text-sm text-gray-500">ฝ่ายบริหารวิชาการ โรงเรียนทรัพย์ทวี</h2>
-                <p className="text-[8px] text-gray-400 whitespace-nowrap">สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุราษฎร์ธานี เขต 3</p>
+                <p className="text-[10px] text-gray-400 whitespace-nowrap">สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุราษฎร์ธานี เขต 3</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -447,7 +447,7 @@
                   const heightPct = (count / chartMax) * 100;
                   return (
                     <div key={grade} className="flex flex-col items-center flex-1 group">
-                      <div className="relative w-full max-w-[40px] h-58 flex items-end justify-center">
+                      <div className="relative w-full max-w-[40px] h-54 flex items-end justify-center">
                         <span className="absolute -top-7 text-xs font-bold text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">{count}</span>
                         <div className="w-full rounded-t-lg transition-all duration-500 group-hover:opacity-80 shadow-sm" style={{ height: `${heightPct}%`, minHeight: count > 0 ? '20px' : '0px', backgroundColor: Object.values(colors)[idx % 6] }}></div>
                       </div>
