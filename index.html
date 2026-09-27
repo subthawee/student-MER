@@ -20,21 +20,16 @@
     body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f6; }
     h1, h2, h3, h4, h5, h6, .font-prompt { font-family: 'Prompt', sans-serif; }
 
-    /* Animations */
     .slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
     .fade-in { animation: fadeIn 0.4s ease-out forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     
-    /* Custom Scrollbar */
     .a4-scroll::-webkit-scrollbar { width: 8px; }
     .a4-scroll::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
     .a4-scroll::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
     .a4-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
-    /* ==========================================
-       PRINT STYLES
-       ========================================== */
     @media print {
       header, aside, footer, .no-print, .alert-modal { display: none !important; }
       body, html { background: white !important; padding: 0 !important; margin: 0 !important; }
@@ -59,24 +54,18 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // --- CONFIGURATION ---
     const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzYSVku10SpSO3faAIv771kt02C7ZYmJ60vevTVa2o5oAYTBljc4oE2qRCD0evRn41hwg/exec';
 
-    // --- THEME COLORS ---
     const colors = {
       pink: '#F055A5', lemon: '#FABE37', lime: '#CCD537', violet: '#7A88FE', orange: '#FF9B28', blue: '#BFDFF3'
     };
 
-    // --- ICON HELPER ---
     const Icon = ({ name, size = 24, className = "" }) => {
       const svgContent = typeof feather !== 'undefined' && feather.icons[name] 
         ? feather.icons[name].toSvg({ width: size, height: size, class: className }) : '';
       return <span dangerouslySetInnerHTML={{ __html: svgContent }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
     };
 
-    // ==========================================
-    // MAIN APP COMPONENT
-    // ==========================================
     function App() {
       const [user, setUser] = useState(null);
       const [appState, setAppState] = useState({ isLoading: false, error: null });
@@ -176,9 +165,6 @@
       );
     }
 
-    // ==========================================
-    // LOGIN SCREEN
-    // ==========================================
     function LoginScreen({ onLogin, isLoading, error }) {
       const [role, setRole] = useState('Teacher');
       const [password, setPassword] = useState('');
@@ -187,8 +173,6 @@
       return (
         <div className="min-h-screen flex items-center justify-center bg-[#f3f4f6] font-sans p-4 md:p-12">
           <div className="bg-white rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.2)] max-w-6xl w-[92%] flex flex-col md:flex-row overflow-hidden min-h-0 md:min-h-[500px] border border-gray-100 slide-in">
-            
-            {/* ซ้าย */}
             <div className="w-full md:w-1/2 h-[320px] md:h-auto relative overflow-hidden flex flex-col justify-between p-4 md:p-10">
               <div className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 hover:scale-105" style={{ backgroundImage: "url('https://lh3.googleusercontent.com/d/1kWb3n5n5y5S1HrxjUeXuJzZIC6HE3BAe')" }} />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent" />
@@ -225,7 +209,6 @@
               </div>
             </div>
 
-            {/* ขวา */}
             <div className="w-full md:w-1/2 flex items-center justify-center p-8 md:p-12 bg-white relative">
               <div className="w-full max-w-[380px] fade-in" style={{animationDelay: '0.3s'}}>
                 <div className="text-center mb-2">
@@ -266,9 +249,6 @@
       );
     }
 
-    // ==========================================
-    // MAIN LAYOUT
-    // ==========================================
     function MainLayout({ user, onLogout, settings, dbData, fetchAPI, setSettings, reloadData }) {
       const [isSidebarOpen, setIsSidebarOpen] = useState(false);
       const [currentRoute, setCurrentRoute] = useState('dashboard');
@@ -353,9 +333,6 @@
       );
     }
 
-    // ==========================================
-    // DASHBOARD & HISTORY
-    // ==========================================
     function Dashboard({ dbData, user }) {
       const [viewMode, setViewMode] = useState('overview'); 
 
@@ -376,6 +353,40 @@
       const maxGradeCount = Math.max(...Object.values(gradeCounts), 1);
       const passPercent = totalStudents > 0 ? Math.round((totalPass / totalStudents) * 100) : 0;
 
+      const totalElStudents = dbData.elStudents?.length || 0;
+      const elGradeCounts = {'ป.1': 0, 'ป.2': 0, 'ป.3': 0, 'ป.4': 0, 'ป.5': 0, 'ป.6': 0};
+      (dbData.elStudents || []).forEach(s => {
+        if (elGradeCounts[s.grade] !== undefined) elGradeCounts[s.grade]++;
+      });
+      const maxElGradeCount = Math.max(...Object.values(elGradeCounts), 1);
+
+      const myRecentGrades = (dbData.grades || []).filter(g => g.teacher === user.name);
+      const myRecentElTime = (dbData.elTime || []).filter(t => t.teacher === user.name);
+      
+      const uniqueActivities = [];
+      const activitySet = new Set();
+
+      myRecentGrades.forEach(g => {
+          const student = (dbData.students || []).find(s => s.id === g.studentId);
+          const sGrade = student ? student.grade : '';
+          if(sGrade) {
+              const key = `sec-${g.subjectId}-${sGrade}`;
+              if(!activitySet.has(key)) {
+                  activitySet.add(key);
+                  const subName = (dbData.subjects || []).find(s=>s.id === g.subjectId)?.name || g.subjectId;
+                  uniqueActivities.push({ type: 'มัธยม', grade: sGrade, subject: subName, code: g.subjectId });
+              }
+          }
+      });
+      myRecentElTime.forEach(t => {
+          const key = `pri-${t.subjectId}-${t.grade}`;
+          if(!activitySet.has(key)) {
+              activitySet.add(key);
+              uniqueActivities.push({ type: 'ประถม', grade: t.grade, subject: t.subjectName, code: t.subjectId });
+          }
+      });
+      uniqueActivities.sort((a,b) => a.grade.localeCompare(b.grade));
+
       return (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
@@ -388,7 +399,6 @@
           
           {viewMode === 'overview' ? (
             <div className="fade-in">
-              {/* แถวบน 4 กล่องดีไซน์ดั้งเดิม */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 mb-6">
                 <StatCard title="นักเรียนทั้งหมด (มัธยม)" value={totalStudents} color={colors.violet} icon="users" />
                 <StatCard title="ผ่านเกณฑ์ (มีสิทธิ์สอบ)" value={totalPass} color={colors.lime} icon="check-circle" />
@@ -405,7 +415,6 @@
                 </div>
               </div>
 
-              {/* กราฟดีไซน์ดั้งเดิม */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <h3 className="text-lg font-bold text-gray-800 mb-6">จำนวนนักเรียนแยกตามระดับชั้น (มัธยม)</h3>
@@ -448,6 +457,69 @@
                   </div>
                 </div>
               </div>
+
+              <div className="mt-8">
+                <h3 className="text-xl font-bold text-gray-800 border-l-4 pl-3 border-[#CCD537] mb-6">ภาพรวมระดับประถมศึกษา</h3>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="flex flex-col gap-4">
+                     <StatCard title="นักเรียนทั้งหมด (ประถม)" value={totalElStudents} color={colors.blue} icon="users" textColor="text-gray-700" />
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col justify-center transition-all hover:shadow-lg hover:-translate-y-1">
+                        <div className="flex items-center gap-4 mb-2">
+                            <div className="w-12 h-12 rounded-xl bg-[#CCD537]/20 flex items-center justify-center text-[#CCD537] shadow-inner"><Icon name="clock" /></div>
+                            <div>
+                                <h4 className="font-bold text-gray-700 text-lg">ระบบบันทึกเวลาเรียน</h4>
+                                <p className="text-sm text-gray-500">พร้อมใช้งานสำหรับครูประถม</p>
+                            </div>
+                        </div>
+                     </div>
+                  </div>
+                  <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-800 mb-6">จำนวนนักเรียนแยกตามระดับชั้น (ประถม)</h3>
+                    <div className="h-44 flex items-end justify-around gap-2 pt-6">
+                      {Object.keys(elGradeCounts).map((grade, idx) => {
+                        const count = elGradeCounts[grade];
+                        const chartMax = Math.ceil(maxElGradeCount / 10) * 10;
+                        const heightPct = chartMax === 0 ? 0 : (count / chartMax) * 100;
+                        return (
+                          <div key={grade} className="flex flex-col items-center flex-1 group">
+                            <div className="relative w-full max-w-[40px] h-36 flex items-end justify-center">
+                              <span className="absolute -top-7 text-xs font-bold text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">{count}</span>
+                              <div className="w-full rounded-t-lg transition-all duration-500 group-hover:opacity-80 shadow-sm" style={{ height: `${heightPct}%`, minHeight: count > 0 ? '15px' : '0px', backgroundColor: colors.blue }}></div>
+                            </div>
+                            <span className="text-xs text-gray-500 mt-3 font-medium">{grade}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2"><Icon name="check-square" className="text-[#FF9B28]"/> วิชาที่คุณบันทึกข้อมูลแล้ว</h3>
+                  <p className="text-sm text-gray-500 mb-6">สรุปรายวิชาและระดับชั้นที่ <span className="font-bold text-[#7A88FE]">{user.name}</span> ได้ทำการบันทึกข้อมูลลงระบบแล้ว (รวบรวมจากประวัติล่าสุด)</p>
+                  
+                  {uniqueActivities.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {uniqueActivities.map((act, idx) => (
+                              <div key={idx} className="flex items-center p-3 rounded-xl border border-gray-100 bg-gray-50 hover:bg-white hover:shadow-md transition-all">
+                                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center font-bold text-white mr-4 shadow-sm shrink-0 ${act.type === 'ประถม' ? 'bg-[#CCD537]' : 'bg-[#F055A5]'}`}>
+                                      {act.grade}
+                                  </div>
+                                  <div className="min-w-0">
+                                      <p className="font-bold text-gray-700 text-sm truncate" title={act.subject}>{act.subject}</p>
+                                      <p className="text-xs text-gray-500 font-mono">{act.code} • {act.type}</p>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  ) : (
+                      <div className="text-center py-8 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                          <Icon name="inbox" size={32} className="mx-auto text-gray-300 mb-2" />
+                          <p className="text-gray-500 font-medium">คุณยังไม่ได้บันทึกข้อมูลรายวิชาใดๆ ในระบบ</p>
+                      </div>
+                  )}
+              </div>
             </div>
           ) : (
             <TeacherHistory dbData={dbData} user={user} />
@@ -456,12 +528,12 @@
       );
     }
 
-    function StatCard({ title, value, color, icon }) {
+    function StatCard({ title, value, color, icon, textColor="text-white" }) {
       return (
         <div className="rounded-2xl p-4 md:p-5 shadow-md flex flex-col md:flex-row items-center gap-2 md:gap-4 relative overflow-hidden group transition-all hover:shadow-lg hover:-translate-y-1" style={{ backgroundColor: color }}>
           <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-white opacity-10 transition-transform duration-500 group-hover:scale-[1.8]"></div>
-          <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 rounded-xl md:rounded-2xl flex items-center justify-center shadow-inner z-10 bg-white/20 text-white backdrop-blur-sm"><Icon name={icon} /></div>
-          <div className="z-10 text-center md:text-left w-full text-white">
+          <div className={`w-10 h-10 md:w-14 md:h-14 shrink-0 rounded-xl md:rounded-2xl flex items-center justify-center shadow-inner z-10 bg-white/20 backdrop-blur-sm ${textColor}`}><Icon name={icon} /></div>
+          <div className={`z-10 text-center md:text-left w-full ${textColor}`}>
             <p className="text-[10px] md:text-sm font-semibold mb-0.5 md:mb-1 line-clamp-1 opacity-90">{title}</p>
             <h3 className="text-xl md:text-3xl font-bold drop-shadow-sm">{value}</h3>
           </div>
@@ -481,7 +553,6 @@
         let displayData = [];
         let cols = [];
 
-        // ฟังก์ชันช่วยเหลือสำหรับหาข้อมูลนักเรียน (ชื่อและชั้น) จาก ID
         const getStudentInfo = (id) => {
             let st = dbData.students.find(s => String(s.id) === String(id));
             if(st) return st;
@@ -490,7 +561,6 @@
             return { name: 'ไม่พบชื่อ', grade: '' };
         }
 
-        // จัดเตรียมชุดข้อมูลและ Map ชื่อนักเรียน
         let rawData = [];
         if(filter === 'ms') {
             rawData = myGrades.filter(g => g.status === 'มส 60%' || g.status === 'มส 80%' || g.status === 'ผ่านเกณฑ์');
@@ -502,11 +572,10 @@
             rawData = myGrades.filter(g => g.status === '0' || g.status === 'ปกติ');
             cols = ['ปี/เทอม', 'รหัสวิชา', 'รหัสนร.', 'ชื่อนักเรียน', 'ชั้น', 'ผลการเรียน'];
         } else if (filter === 'eltime') {
-            rawData = myElTime.map(t => ({...t, sGrade: t.grade})); // เพื่อให้กรองได้เหมือนกัน
+            rawData = myElTime.map(t => ({...t, sGrade: t.grade}));
             cols = ['ปี/เทอม', 'วิชา', 'รหัสนร.', 'ชื่อนักเรียน', 'ชั้น', 'มาเรียน(%)', 'หมายเหตุ'];
         }
 
-        // Map ชื่อและชั้นใส่เข้าไปใน data สำหรับการกรอง
         displayData = rawData.map(row => {
             if(filter !== 'eltime') {
                 const info = getStudentInfo(row.studentId);
@@ -515,15 +584,12 @@
             return row;
         });
 
-        // กรองข้อมูลตามระดับชั้น
         if(gradeFilter !== 'ทั้งหมด') {
             displayData = displayData.filter(d => d.sGrade === gradeFilter);
         }
 
         return (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 fade-in">
-                
-                {/* ตัวกรองหมวดหมู่ */}
                 <div className="flex flex-wrap gap-2 mb-4">
                     <button onClick={()=>{setFilter('ms'); setGradeFilter('ทั้งหมด');}} className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${filter === 'ms' ? 'bg-[#F055A5] text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>บันทึก มส</button>
                     <button onClick={()=>{setFilter('r-ms'); setGradeFilter('ทั้งหมด');}} className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${filter === 'r-ms' ? 'bg-[#FF9B28] text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>แก้ ร มส</button>
@@ -531,11 +597,9 @@
                     <button onClick={()=>{setFilter('eltime'); setGradeFilter('ทั้งหมด');}} className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${filter === 'eltime' ? 'bg-[#CCD537] text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>เวลาเรียนประถม</button>
                 </div>
 
-                {/* ตัวกรองระดับชั้น */}
                 <div className="flex flex-wrap gap-2 mb-6 p-3 bg-gray-50 rounded-xl border border-gray-100">
                     <span className="text-sm font-bold text-gray-700 flex items-center mr-2"><Icon name="filter" size={16} className="mr-1" /> ระดับชั้น:</span>
                     {allGrades.map(g => {
-                        // ซ่อนตัวกรองมัธยมถ้าอยู่โหมดประถม และซ่อนตัวกรองประถมถ้าอยู่โหมดมัธยม
                         if(filter === 'eltime' && g.includes('ม.')) return null;
                         if(filter !== 'eltime' && g.includes('ป.')) return null;
                         
@@ -593,9 +657,6 @@
         )
     }
 
-    // ==========================================
-    // RECORD SYSTEM (มัธยม: มส, ร-มส, 0)
-    // ==========================================
     function RecordSystem({ type, isOpen, settings, dbData, user, showAlert, fetchAPI, reloadData }) {
       const [grade, setGrade] = useState('');
       const [subjectId, setSubjectId] = useState('');
@@ -653,7 +714,7 @@
         if (recordsCount === 0) return showAlert('แจ้งเตือน', 'คุณยังไม่ได้ทำรายการใดๆ', 'error');
 
         const confirmMsg = hasExistingData 
-            ? `ตรวจพบข้อมูลเดิมในระบบ คุณต้องการอัปเดตข้อมูลใช่หรือไม่?` 
+            ? `คุณต้องการอัปเดตข้อมูลใช่หรือไม่?` 
             : `คุณต้องการบันทึกข้อมูลจำนวน ${recordsCount} รายการ ใช่หรือไม่?`;
 
         showAlert('ยืนยันการบันทึก', confirmMsg, 'info', async () => {
@@ -666,7 +727,7 @@
             showAlert('สำเร็จ', 'บันทึกข้อมูลลงในระบบเรียบร้อยแล้ว', 'success');
             await reloadData();
           } catch (err) {
-            showAlert('เกิดข้อผิดพลาด', err.message, 'error');
+            showAlert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้', 'error');
           } finally {
             setIsSaving(false);
           }
@@ -773,9 +834,6 @@
       );
     }
 
-    // ==========================================
-    // RECORD EL TIME (เวลาเรียนประถม)
-    // ==========================================
     function RecordElTime({ isOpen, settings, dbData, user, showAlert, fetchAPI, reloadData }) {
       const [grade, setGrade] = useState('');
       const [subjectId, setSubjectId] = useState('');
@@ -796,7 +854,8 @@
       }
 
       const gradeOptions = ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'];
-      const filteredSubjects = (dbData.elSubjects || []).filter(s => String(s.term) === String(term));
+      // โค้ดกรองวิชาตามภาคเรียน (term) และระดับชั้น (grade) ฉบับสมบูรณ์
+      const filteredSubjects = (dbData.elSubjects || []).filter(s => String(s.term) === String(term) && (!s.grade || String(s.grade) === String(grade)));
       const displayStudents = (dbData.elStudents || []).filter(s => s.grade === grade);
 
       useEffect(() => {
@@ -846,7 +905,7 @@
         if (recordsCount === 0) return showAlert('แจ้งเตือน', 'คุณยังไม่ได้กรอกข้อมูลใดๆ', 'error');
 
         const confirmMsg = hasExistingData 
-            ? `ตรวจพบข้อมูลเดิมในระบบ คุณต้องการอัปเดตข้อมูลใช่หรือไม่?` 
+            ? `คุณต้องการอัปเดตข้อมูลใช่หรือไม่?` 
             : `ยืนยันการบันทึกเวลาเรียนจำนวน ${recordsCount} รายการ?`;
 
         showAlert('ยืนยันการบันทึก', confirmMsg, 'info', async () => {
@@ -869,7 +928,7 @@
             showAlert('สำเร็จ', 'บันทึกเวลาเรียนเรียบร้อยแล้ว', 'success');
             await reloadData();
           } catch (err) {
-            showAlert('เกิดข้อผิดพลาด', err.message, 'error');
+            showAlert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้', 'error');
           } finally {
             setIsSaving(false);
           }
@@ -891,7 +950,7 @@
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">ระดับชั้น</label>
                 <div className="relative group">
-                  <select className="w-full appearance-none px-5 py-4 rounded-xl border-2 border-gray-100 bg-white focus:ring-4 focus:ring-[#CCD537]/20 focus:border-[#CCD537] transition-all text-gray-700 font-bold cursor-pointer outline-none hover:border-gray-200" value={grade} onChange={e => {setGrade(e.target.value); setFormData({});}}>
+                  <select className="w-full appearance-none px-5 py-4 rounded-xl border-2 border-gray-100 bg-white focus:ring-4 focus:ring-[#CCD537]/20 focus:border-[#CCD537] transition-all text-gray-700 font-bold cursor-pointer outline-none hover:border-gray-200" value={grade} onChange={e => {setGrade(e.target.value); setSubjectId(''); setFormData({});}}>
                     <option value="">-- เลือก --</option>
                     {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
@@ -916,12 +975,12 @@
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">รายวิชา</label>
                 <div className="relative group">
-                  <select className={`w-full appearance-none px-5 py-4 rounded-xl border-2 transition-all font-bold outline-none ${!term ? 'border-gray-100 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-100 bg-white focus:ring-4 focus:ring-[#CCD537]/20 focus:border-[#CCD537] text-gray-700 cursor-pointer hover:border-gray-200'}`} value={subjectId} onChange={e => setSubjectId(e.target.value)} disabled={!term}>
+                  <select className={`w-full appearance-none px-5 py-4 rounded-xl border-2 transition-all font-bold outline-none ${!term || !grade ? 'border-gray-100 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-100 bg-white focus:ring-4 focus:ring-[#CCD537]/20 focus:border-[#CCD537] text-gray-700 cursor-pointer hover:border-gray-200'}`} value={subjectId} onChange={e => setSubjectId(e.target.value)} disabled={!term || !grade}>
                     <option value="">-- เลือกวิชา --</option>
                     {filteredSubjects.map(s => <option key={s.id} value={s.id}>{s.name} ({s.id})</option>)}
                   </select>
-                  <div className={`absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center pointer-events-none ${!term ? 'bg-transparent' : 'bg-gray-50 group-hover:bg-[#CCD537]/10'}`}>
-                    <Icon name="chevron-down" className={!term ? 'text-gray-300' : 'text-gray-400 group-hover:text-[#CCD537]'} size={18} />
+                  <div className={`absolute right-4 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center pointer-events-none ${!term || !grade ? 'bg-transparent' : 'bg-gray-50 group-hover:bg-[#CCD537]/10'}`}>
+                    <Icon name="chevron-down" className={!term || !grade ? 'text-gray-300' : 'text-gray-400 group-hover:text-[#CCD537]'} size={18} />
                   </div>
                 </div>
               </div>
@@ -982,10 +1041,6 @@
       );
     }
 
-
-    // ==========================================
-    // REPORTS SYSTEM
-    // ==========================================
     function ReportsSystem({ isOpen, settings, dbData, showAlert }) {
       const [reportType, setReportType] = useState(null); 
       const [selectedGrade, setSelectedGrade] = useState('');
@@ -1302,9 +1357,6 @@
       );
     }
 
-    // ==========================================
-    // ADMIN SETTINGS
-    // ==========================================
     function AdminSettings({ settings, setSettings, fetchAPI, showAlert }) {
       const [localSettings, setLocalSettings] = useState(settings);
       const [isSaving, setIsSaving] = useState(false);
